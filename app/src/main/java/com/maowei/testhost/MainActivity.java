@@ -3,9 +3,9 @@ package com.maowei.testhost;
 import android.app.PendingIntent;
 import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.hardware.usb.UsbConstants;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbEndpoint;
@@ -20,8 +20,6 @@ import android.widget.Button;
 
 import java.nio.ByteBuffer;
 import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -29,17 +27,18 @@ public class MainActivity extends AppCompatActivity {
     private static final String ACTION_USB_PERMISSION =
             "com.android.example.USB_PERMISSION";
 
-    private PendingIntent mPermissionIntent = null;
     private Button mButton = null;
     private Button mSendButton = null;
     private Button mRcvButton = null;
-    private  HashMap<String, UsbDevice> deviceList = null;
-    private UsbManager manager = null;
-    private UsbDevice mDevice = null;
-    private UsbInterface mUsbInterface = null;
-    private UsbEndpoint mEndpointOut = null;
-    private UsbEndpoint mEndpointIn = null;
-    private UsbDeviceConnection mDeviceConnection = null;
+
+    private PendingIntent mPermissionIntent;
+    private UsbManager mUsbManager;
+    private UsbDevice mDevice;
+    private UsbInterface mUsbInterface;
+    private UsbEndpoint mEndpointOut;
+    private UsbEndpoint mEndpointIn;
+    private UsbDeviceConnection mDeviceConnection;
+
 
     private final byte[] bytes = {0,1,2,3,4,5};
     private final int baurt = 9600;
@@ -52,17 +51,22 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         mButton = (Button) findViewById(R.id.fresh_button);
-        mButton.setOnClickListener(mOnClickListener);
         mSendButton = (Button)findViewById(R.id.send);
-        mSendButton.setOnClickListener(mOnClickListener);
         mRcvButton = (Button)findViewById(R.id.receive);
+        mButton.setOnClickListener(mOnClickListener);
+        mSendButton.setOnClickListener(mOnClickListener);
         mRcvButton.setOnClickListener(mOnClickListener);
 
-        manager = (UsbManager)getSystemService(Context.USB_SERVICE);
+        mUsbManager = (UsbManager)getSystemService(Context.USB_SERVICE);
         mPermissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
         IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
         registerReceiver(mUsbReceiver, filter);
+    }
 
+    @Override
+    public void onDestroy() {
+        unregisterReceiver(mUsbReceiver);
+        releaseUsbSrc();
     }
 
     private View.OnClickListener mOnClickListener = new View.OnClickListener() {
@@ -70,7 +74,7 @@ public class MainActivity extends AppCompatActivity {
         public void onClick(View v) {
             switch(v.getId()) {
                 case R.id.fresh_button :
-                    getDevice();
+                    connectDevice();
                     break;
                 case R.id.send :
                     sendByte();
@@ -83,24 +87,34 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
-    public void getDevice() {
-        deviceList = manager.getDeviceList();
+    public void connectDevice() {
+        if(findUartDevice()) {
+            requestPermission();
+        }
+    }
+
+    public boolean findUartDevice() {
+        HashMap<String, UsbDevice> deviceList = mUsbManager.getDeviceList();
         if(! deviceList.isEmpty()) {
             for(UsbDevice device :  deviceList.values()) {
-                if(device.getDeviceClass() == 255)
-                mDevice = device;
-            }
-            if(mDevice!= null) {
-                Log.d(TAG,"get device");
-                manager.requestPermission(mDevice,mPermissionIntent);
-            }
-            else {
-                Log.d(TAG,"can't get device");
+                if(device.getDeviceClass() == 255) {
+                    mDevice = device;
+                    break;
+                }
             }
         }
         else {
             Log.e(TAG,"no device found");
+            return false;
         }
+        return true;
+    }
+
+    public void requestPermission() {
+        if(mDevice!= null)
+            mUsbManager.requestPermission(mDevice,mPermissionIntent);
+        else
+            Log.d(TAG,"can't get device");
     }
 
     public void sendByte() {
@@ -110,14 +124,14 @@ public class MainActivity extends AppCompatActivity {
                 public void run() {
                     Log.d(TAG,"sendbyte right now");
                     mEndpointOut = mUsbInterface.getEndpoint(1);
-                    mDeviceConnection = manager.openDevice(mDevice);
+                    mDeviceConnection = mUsbManager.openDevice(mDevice);
                     mDeviceConnection.claimInterface(mUsbInterface, forceClaim);
                     ByteBuffer buffer = ByteBuffer.allocate(24);
                     buffer.clear();
                     UsbRequest request = new UsbRequest();
                     request.initialize(mDeviceConnection, mEndpointOut);
-                    UartInit();
-                    SetConfig(baurt,(byte) 8, (byte) 1, (byte) 0, (byte) 0);
+                    uartInit();
+                    setUartConfig(baurt,(byte) 8, (byte) 1, (byte) 0, (byte) 0);
                     byte a = 1;
                     buffer.put(a);
                     boolean retval = request.queue(buffer, 1);
@@ -135,7 +149,7 @@ public class MainActivity extends AppCompatActivity {
         if(mDevice != null) {
             mUsbInterface = mDevice.getInterface(0);
             mEndpointIn = mUsbInterface.getEndpoint(0);
-            mDeviceConnection = manager.openDevice(mDevice);
+            mDeviceConnection = mUsbManager.openDevice(mDevice);
             mDeviceConnection.claimInterface(mUsbInterface, forceClaim);
             Thread t = new Thread(new Runnable() {
                 @Override
@@ -150,25 +164,25 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public boolean UartInit(){
+    public boolean uartInit(){
         int ret;
         int size = 8;
         byte[] buffer = new byte[size];
-        Uart_Control_Out(UartCmd.VENDOR_SERIAL_INIT, 0x0000, 0x0000);
-        ret = Uart_Control_In(UartCmd.VENDOR_VERSION, 0x0000, 0x0000, buffer, 2);
+        uartControlOut(UartCmd.VENDOR_SERIAL_INIT, 0x0000, 0x0000);
+        ret = uartControlIn(UartCmd.VENDOR_VERSION, 0x0000, 0x0000, buffer, 2);
         if(ret < 0)
             return false;
-        Uart_Control_Out(UartCmd.VENDOR_WRITE, 0x1312, 0xD982);
-        Uart_Control_Out(UartCmd.VENDOR_WRITE, 0x0f2c, 0x0004);
-        ret = Uart_Control_In(UartCmd.VENDOR_READ, 0x2518, 0x0000, buffer, 2);
+        uartControlOut(UartCmd.VENDOR_WRITE, 0x1312, 0xD982);
+        uartControlOut(UartCmd.VENDOR_WRITE, 0x0f2c, 0x0004);
+        ret = uartControlIn(UartCmd.VENDOR_READ, 0x2518, 0x0000, buffer, 2);
         if(ret < 0)
             return false;
-        Uart_Control_Out(UartCmd.VENDOR_WRITE, 0x2727, 0x0000);
-        Uart_Control_Out(UartCmd.VENDOR_MODEM_OUT, 0x00ff, 0x0000);
+        uartControlOut(UartCmd.VENDOR_WRITE, 0x2727, 0x0000);
+        uartControlOut(UartCmd.VENDOR_MODEM_OUT, 0x00ff, 0x0000);
         return true;
     }
 
-    public int Uart_Control_Out(int request, int value, int index)
+    public int uartControlOut(int request, int value, int index)
     {
         int retval = 0;
         retval = mDeviceConnection.controlTransfer(UsbType.USB_TYPE_VENDOR | UsbType.USB_RECIP_DEVICE | UsbType.USB_DIR_OUT,
@@ -177,7 +191,7 @@ public class MainActivity extends AppCompatActivity {
         return retval;
     }
 
-    public int Uart_Control_In(int request, int value, int index, byte[] buffer, int length)
+    public int uartControlIn(int request, int value, int index, byte[] buffer, int length)
     {
         int retval = 0;
         retval = mDeviceConnection.controlTransfer(UsbType.USB_TYPE_VENDOR | UsbType.USB_RECIP_DEVICE | UsbType.USB_DIR_IN,
@@ -185,7 +199,7 @@ public class MainActivity extends AppCompatActivity {
         return retval;
     }
 
-    public boolean SetConfig(int baudRate, byte dataBit, byte stopBit, byte parity, byte flowControl){
+    public boolean setUartConfig(int baudRate, byte dataBit, byte stopBit, byte parity, byte flowControl){
         int value = 0;
         int index = 0;
         char valueHigh = 0, valueLow = 0, indexHigh = 0, indexLow = 0;
@@ -340,7 +354,7 @@ public class MainActivity extends AppCompatActivity {
         index |= 0x88 |indexLow;
         index |= (int)(indexHigh << 8);
 
-        Uart_Control_Out(UartCmd.VENDOR_SERIAL_INIT, value, index);
+        uartControlOut(UartCmd.VENDOR_SERIAL_INIT, value, index);
         if(flowControl == 1) {
             Uart_Tiocmset(UartModem.TIOCM_DTR | UartModem.TIOCM_RTS, 0x00);
         }
@@ -362,9 +376,50 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private int Uart_Set_Handshake(int control) {
-        return Uart_Control_Out(UartCmd.VENDOR_MODEM_OUT, ~control, 0);
+        return uartControlOut(UartCmd.VENDOR_MODEM_OUT, ~control, 0);
     }
 
+    private void setInterface(UsbDevice device) {
+        if(device != null) {
+            mUsbInterface = device.getInterface(0);
+        }
+        else {
+            Log.e(TAG,"Can't get interface for device" + device.getDeviceName());
+        }
+    }
+
+    private void setEndpoint() {
+        UsbEndpoint epOut = null;
+        UsbEndpoint epIn = null;
+        if(mUsbInterface != null) {
+            for(int i = 0; i < mUsbInterface.getEndpointCount(); i++) {
+                UsbEndpoint ep = mUsbInterface.getEndpoint(i);
+                if(ep.getDirection() == UsbConstants.USB_DIR_OUT) {
+                    epOut = ep;
+                }
+                else {
+                    epIn = ep;
+                }
+            }
+            if(epOut == null || epIn == null) {
+                throw new IllegalArgumentException("not all endpoints found");
+            }
+            mEndpointOut = epOut;
+            mEndpointIn = epIn;
+        }
+    }
+
+    private void releaseUsbSrc() {
+        if(mDeviceConnection != null) {
+            if(mUsbInterface != null) {
+                mDeviceConnection.releaseInterface(mUsbInterface);
+                mUsbInterface = null;
+            }
+            mDeviceConnection.close();
+            mDevice = null;
+            mDeviceConnection = null;
+        }
+    }
 
     private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
 
@@ -372,13 +427,11 @@ public class MainActivity extends AppCompatActivity {
             String action = intent.getAction();
             if (ACTION_USB_PERMISSION.equals(action)) {
                 synchronized (this) {
-                    UsbDevice device = (UsbDevice)intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
+                    UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
 
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        if(device != null){
-                            mUsbInterface = device.getInterface(0);
-                            Log.d(TAG,"get permission for the device");
-                        }
+                        setInterface(device);
+                        setEndpoint();
                     }
                     else {
                         Log.d(TAG, "permission denied for device " + device);

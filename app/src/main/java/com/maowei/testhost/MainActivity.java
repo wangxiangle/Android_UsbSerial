@@ -38,6 +38,8 @@ public class MainActivity extends AppCompatActivity {
     private UsbEndpoint mEndpointOut;
     private UsbEndpoint mEndpointIn;
     private UsbDeviceConnection mDeviceConnection;
+    private UsbRequest mRequestOut;
+    private UsbRequest mRequestIn;
 
 
     private final byte[] bytes = {0,1,2,3,4,5};
@@ -122,20 +124,11 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    Log.d(TAG,"sendbyte right now");
-                    mEndpointOut = mUsbInterface.getEndpoint(1);
-                    mDeviceConnection = mUsbManager.openDevice(mDevice);
-                    mDeviceConnection.claimInterface(mUsbInterface, forceClaim);
                     ByteBuffer buffer = ByteBuffer.allocate(24);
                     buffer.clear();
-                    UsbRequest request = new UsbRequest();
-                    request.initialize(mDeviceConnection, mEndpointOut);
-                    uartInit();
-                    setUartConfig(baurt,(byte) 8, (byte) 1, (byte) 0, (byte) 0);
-                    byte a = 1;
+                    byte a = 5;
                     buffer.put(a);
-                    boolean retval = request.queue(buffer, 1);
-                   // System.out.println(retval);
+                    boolean retval = mRequestOut.queue(buffer, 1);
                 }
             });
             t.run();
@@ -147,20 +140,46 @@ public class MainActivity extends AppCompatActivity {
 
     public void receiveByte() {
         if(mDevice != null) {
-            mUsbInterface = mDevice.getInterface(0);
-            mEndpointIn = mUsbInterface.getEndpoint(0);
-            mDeviceConnection = mUsbManager.openDevice(mDevice);
-            mDeviceConnection.claimInterface(mUsbInterface, forceClaim);
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-
+                    ByteBuffer rcvbuf = ByteBuffer.allocate(24);
+                    rcvbuf.clear();
+                   if(mRequestIn.queue(rcvbuf, 2) == true) {
+                       Log.d(TAG,"queue is ok");
+                      mRequestIn = mDeviceConnection.requestWait();
+                       byte a = rcvbuf.get();
+                       System.out.println(a);
+                   }
                 }
             });
             t.run();
         }
         else {
             Log.e(TAG,"can't find mDevice when sending byte");
+        }
+    }
+
+    public void initRequest() {
+        if(mDeviceConnection != null) {
+            mRequestOut = new UsbRequest();
+            mRequestIn = new UsbRequest();
+            mRequestOut.initialize(mDeviceConnection, mEndpointOut);
+            mRequestIn.initialize(mDeviceConnection, mEndpointIn);
+        }
+        else {
+            Log.e(TAG, "failed to initialize request");
+        }
+    }
+
+    public void  configUartMode() {
+        if(mDeviceConnection != null) {
+            uartInit();
+            setUartConfig(baurt, (byte) 8, (byte) 1, (byte) 0, (byte) 0);
+            Log.d(TAG,"config UartMode is ok");
+        }
+        else {
+            Log.e(TAG,"failed to config Uart mode");
         }
     }
 
@@ -409,6 +428,21 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private void setDeviceConnection() {
+        if(mDevice != null && mUsbInterface != null) {
+            mDeviceConnection = mUsbManager.openDevice(mDevice);
+            if(mDeviceConnection.claimInterface(mUsbInterface, true)) {
+                Log.d(TAG,"claim Interface succeeded");
+            }
+            else {
+                Log.e(TAG,"failed to claim interface");
+            }
+        }
+        else {
+            Log.e(TAG,"failed to open device.");
+        }
+    }
+
     private void releaseUsbSrc() {
         if(mDeviceConnection != null) {
             if(mUsbInterface != null) {
@@ -421,6 +455,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+
     private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
 
         public void onReceive(Context context, Intent intent) {
@@ -432,6 +467,9 @@ public class MainActivity extends AppCompatActivity {
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
                         setInterface(device);
                         setEndpoint();
+                        setDeviceConnection();
+                        initRequest();
+                        configUartMode();
                     }
                     else {
                         Log.d(TAG, "permission denied for device " + device);

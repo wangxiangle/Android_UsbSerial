@@ -27,9 +27,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String ACTION_USB_PERMISSION =
             "com.android.example.USB_PERMISSION";
 
-    private Button mButton = null;
-    private Button mSendButton = null;
-    private Button mRcvButton = null;
+    private Button mButton;
+    private Button mSendButton;
+    private Button mRcvButton;
 
     private PendingIntent mPermissionIntent;
     private UsbManager mUsbManager;
@@ -143,14 +143,16 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    ByteBuffer rcvbuf = ByteBuffer.allocate(24);
-                    rcvbuf.clear();
-                   if(mRequestIn.queue(rcvbuf, 2) == true) {
-                       Log.d(TAG,"queue is ok");
-                      mRequestIn = mDeviceConnection.requestWait();
-                       byte a = rcvbuf.get();
-                       System.out.println(a);
-                   }
+                    byte[] a = new byte[24];
+                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, a, 24, 1000);
+                    if(result > 0) {
+                        System.out.println("request is ok");
+                        byte m = a[0];
+                        System.out.println(m);
+                    }
+                    else {
+                        System.out.println("read failed");
+                    }
                 }
             });
             t.run();
@@ -413,11 +415,12 @@ public class MainActivity extends AppCompatActivity {
         if(mUsbInterface != null) {
             for(int i = 0; i < mUsbInterface.getEndpointCount(); i++) {
                 UsbEndpoint ep = mUsbInterface.getEndpoint(i);
-                if(ep.getDirection() == UsbConstants.USB_DIR_OUT) {
-                    epOut = ep;
-                }
-                else {
-                    epIn = ep;
+                if(ep.getType() == UsbConstants.USB_ENDPOINT_XFER_BULK) {
+                    if (ep.getDirection() == UsbConstants.USB_DIR_OUT) {
+                        epOut = ep;
+                    } else {
+                        epIn = ep;
+                    }
                 }
             }
             if(epOut == null || epIn == null) {
@@ -425,13 +428,16 @@ public class MainActivity extends AppCompatActivity {
             }
             mEndpointOut = epOut;
             mEndpointIn = epIn;
+
+            System.out.println(mEndpointIn.getType());
+            System.out.println(mEndpointOut.getType());
         }
     }
 
     private void setDeviceConnection() {
         if(mDevice != null && mUsbInterface != null) {
             mDeviceConnection = mUsbManager.openDevice(mDevice);
-            if(mDeviceConnection.claimInterface(mUsbInterface, true)) {
+            if(mDeviceConnection.claimInterface(mUsbInterface, false)) {
                 Log.d(TAG,"claim Interface succeeded");
             }
             else {

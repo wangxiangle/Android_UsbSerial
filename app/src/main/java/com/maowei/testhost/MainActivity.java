@@ -18,7 +18,6 @@ import android.util.Log;
 import android.view.View;
 import android.widget.Button;
 
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 
 public class MainActivity extends AppCompatActivity {
@@ -38,15 +37,10 @@ public class MainActivity extends AppCompatActivity {
     private UsbEndpoint mEndpointOut;
     private UsbEndpoint mEndpointIn;
     private UsbDeviceConnection mDeviceConnection;
-    private UsbRequest mRequestOut;
-    private UsbRequest mRequestIn;
 
-
-    private final byte[] bytes = {0,1,2,3,4,5};
     private final int baurt = 9600;
     private static int TIMEOUT = 0;
     private int DEFAULT_TIMEOUT = 500;
-    private boolean forceClaim = true;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -124,11 +118,14 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    ByteBuffer buffer = ByteBuffer.allocate(24);
-                    buffer.clear();
-                    byte a = 5;
-                    buffer.put(a);
-                    boolean retval = mRequestOut.queue(buffer, 1);
+                    byte[] a = {0,1,-1,-128};
+                    int  result = mDeviceConnection.bulkTransfer(mEndpointOut, a, 4, 1000);
+                    if(result > 0) {
+                        System.out.println("send byte ok");
+                    }
+                    else {
+                        System.out.println("send failed");
+                    }
                 }
             });
             t.run();
@@ -143,12 +140,15 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    byte[] a = new byte[24];
-                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, a, 24, 1000);
+                    byte[] a = new byte[256];
+                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, a, 256, 1000);
                     if(result > 0) {
                         System.out.println("request is ok");
-                        byte m = a[0];
-                        System.out.println(m);
+                        for(int i = 0; i < a.length; i++) {
+                            if(a[i] != 0) {
+                                System.out.println(a[i]);
+                            }
+                        }
                     }
                     else {
                         System.out.println("read failed");
@@ -437,7 +437,7 @@ public class MainActivity extends AppCompatActivity {
     private void setDeviceConnection() {
         if(mDevice != null && mUsbInterface != null) {
             mDeviceConnection = mUsbManager.openDevice(mDevice);
-            if(mDeviceConnection.claimInterface(mUsbInterface, false)) {
+            if(mDeviceConnection.claimInterface(mUsbInterface, true)) {
                 Log.d(TAG,"claim Interface succeeded");
             }
             else {

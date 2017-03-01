@@ -12,11 +12,15 @@ import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
 import android.hardware.usb.UsbRequest;
+import android.os.Handler;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.TextView;
+import android.widget.Toast;
 
 import java.util.HashMap;
 
@@ -29,7 +33,10 @@ public class MainActivity extends AppCompatActivity {
     private Button mButton;
     private Button mSendButton;
     private Button mRcvButton;
+    private TextView mRcvTextView;
+    private EditText mSendEditView;
 
+    private Handler mHandler;
     private PendingIntent mPermissionIntent;
     private UsbManager mUsbManager;
     private UsbDevice mDevice;
@@ -49,6 +56,9 @@ public class MainActivity extends AppCompatActivity {
         mButton = (Button) findViewById(R.id.fresh_button);
         mSendButton = (Button)findViewById(R.id.send);
         mRcvButton = (Button)findViewById(R.id.receive);
+        mRcvTextView = (TextView)findViewById(R.id.receive_text);
+        mSendEditView = (EditText)findViewById(R.id.send_text);
+
         mButton.setOnClickListener(mOnClickListener);
         mSendButton.setOnClickListener(mOnClickListener);
         mRcvButton.setOnClickListener(mOnClickListener);
@@ -57,6 +67,8 @@ public class MainActivity extends AppCompatActivity {
         mPermissionIntent = PendingIntent.getBroadcast(this, 0, new Intent(ACTION_USB_PERMISSION), 0);
         IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
         registerReceiver(mUsbReceiver, filter);
+
+        mHandler = new Handler()
     }
 
     @Override
@@ -118,8 +130,9 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    byte[] a = {0,1,-1,-128};
-                    int  result = mDeviceConnection.bulkTransfer(mEndpointOut, a, 4, 1000);
+                    byte[] data = getByteArrayFromEditText();
+                    int length = data.length;
+                    int  result = mDeviceConnection.bulkTransfer(mEndpointOut, data, length, 1000);
                     if(result > 0) {
                         System.out.println("send byte ok");
                     }
@@ -140,15 +153,10 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    byte[] a = new byte[256];
-                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, a, 256, 1000);
+                    byte[] rcv = new byte[256];
+                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, rcv, 256, 1000);
                     if(result > 0) {
-                        System.out.println("request is ok");
-                        for(int i = 0; i < a.length; i++) {
-                            if(a[i] != 0) {
-                                System.out.println(a[i]);
-                            }
-                        }
+                        showByteArrayInEditText(rcv);
                     }
                     else {
                         System.out.println("read failed");
@@ -162,16 +170,29 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    public void initRequest() {
-        if(mDeviceConnection != null) {
-            mRequestOut = new UsbRequest();
-            mRequestIn = new UsbRequest();
-            mRequestOut.initialize(mDeviceConnection, mEndpointOut);
-            mRequestIn.initialize(mDeviceConnection, mEndpointIn);
+    public byte[] getByteArrayFromEditText() {
+        String dataStr = mSendEditView.getText().toString();
+        byte[] result = hexStr2Bytes(dataStr);
+        return result;
+    }
+
+    public byte[] hexStr2Bytes(String src)
+    {
+        int m=0,n=0;
+        int l=src.length()/2;
+        System.out.println(l);
+        byte[] ret = new byte[l];
+        for (int i = 0; i < l; i++)
+        {
+            m=i*2+1;
+            n=m+1;
+            ret[i] = Byte.decode("0x" + src.substring(i*2, m) + src.substring(m,n));
         }
-        else {
-            Log.e(TAG, "failed to initialize request");
-        }
+        return ret;
+    }
+
+    public void showByteArrayInEditText(byte[] data) {
+
     }
 
     public void  configUartMode() {
@@ -471,10 +492,14 @@ public class MainActivity extends AppCompatActivity {
                     UsbDevice device = intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
 
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
+                        Toast.makeText(
+                                MainActivity.this,
+                                "ACTION_USB_DEVICE_ATTACHED: \n"
+                                        + device.toString(), Toast.LENGTH_LONG)
+                                .show();
                         setInterface(device);
                         setEndpoint();
                         setDeviceConnection();
-                        initRequest();
                         configUartMode();
                     }
                     else {

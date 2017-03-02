@@ -11,8 +11,9 @@ import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbEndpoint;
 import android.hardware.usb.UsbInterface;
 import android.hardware.usb.UsbManager;
-import android.hardware.usb.UsbRequest;
+
 import android.os.Handler;
+import android.os.Message;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -29,6 +30,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final String ACTION_USB_PERMISSION =
             "com.android.example.USB_PERMISSION";
+    private static final int MSG_SHOW_DATA = 1;
 
     private Button mButton;
     private Button mSendButton;
@@ -68,7 +70,19 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter filter = new IntentFilter(ACTION_USB_PERMISSION);
         registerReceiver(mUsbReceiver, filter);
 
-        mHandler = new Handler()
+        mHandler =  new Handler() {
+            @Override
+            public void handleMessage(Message msg) {
+                super.handleMessage(msg);
+                switch(msg.what) {
+                    case 0:
+                        mRcvTextView.setText((String)msg.obj);
+                        break;
+                    case 1:
+                        mRcvTextView.setText("didn't read anything!");
+                }
+            }
+        };
     }
 
     @Override
@@ -110,8 +124,7 @@ public class MainActivity extends AppCompatActivity {
                     break;
                 }
             }
-        }
-        else {
+        } else {
             Log.e(TAG,"no device found");
             return false;
         }
@@ -119,10 +132,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     public void requestPermission() {
-        if(mDevice!= null)
-            mUsbManager.requestPermission(mDevice,mPermissionIntent);
-        else
-            Log.d(TAG,"can't get device");
+        if(mDevice!= null) {
+            mUsbManager.requestPermission(mDevice, mPermissionIntent);
+        } else {
+            Log.d(TAG, "can't get device");
+        }
     }
 
     public void sendByte() {
@@ -134,16 +148,14 @@ public class MainActivity extends AppCompatActivity {
                     int length = data.length;
                     int  result = mDeviceConnection.bulkTransfer(mEndpointOut, data, length, 1000);
                     if(result > 0) {
-                        System.out.println("send byte ok");
-                    }
-                    else {
-                        System.out.println("send failed");
+                        Log.d(TAG,"successful send byte");
+                    } else {
+                        Log.d(TAG,"send byte failed");
                     }
                 }
             });
             t.run();
-        }
-        else {
+        } else {
             Log.e(TAG,"can't find mDevice when sending byte");
         }
     }
@@ -153,19 +165,19 @@ public class MainActivity extends AppCompatActivity {
             Thread t = new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    byte[] rcv = new byte[256];
-                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, rcv, 256, 1000);
+                    byte[] rcv = new byte[8];
+                    int result = mDeviceConnection.bulkTransfer(mEndpointIn, rcv, 8, 500);
                     if(result > 0) {
-                        showByteArrayInEditText(rcv);
-                    }
-                    else {
-                        System.out.println("read failed");
+                        showByteArrayInTextView(rcv);
+                    } else {
+                        Message msg = new Message();
+                        msg.what = 1;
+                        mHandler.sendMessage(msg);
                     }
                 }
             });
             t.run();
-        }
-        else {
+        } else {
             Log.e(TAG,"can't find mDevice when sending byte");
         }
     }
@@ -180,7 +192,6 @@ public class MainActivity extends AppCompatActivity {
     {
         int m=0,n=0;
         int l=src.length()/2;
-        System.out.println(l);
         byte[] ret = new byte[l];
         for (int i = 0; i < l; i++)
         {
@@ -191,8 +202,23 @@ public class MainActivity extends AppCompatActivity {
         return ret;
     }
 
-    public void showByteArrayInEditText(byte[] data) {
+    public void showByteArrayInTextView(byte[] data) {
+        String hexString = byteArrayToHexStr(data);
+        mHandler.sendMessage(mHandler.obtainMessage(0,hexString));
+    }
 
+    public static String byteArrayToHexStr(byte[] byteArray) {
+        if (byteArray == null){
+            return null;
+        }
+        char[] hexArray = "0123456789ABCDEF".toCharArray();
+        char[] hexChars = new char[byteArray.length * 2];
+        for (int j = 0; j < byteArray.length; j++) {
+            int v = byteArray[j] & 0xFF;
+            hexChars[j * 2] = hexArray[v >>> 4];
+            hexChars[j * 2 + 1] = hexArray[v & 0x0F];
+        }
+        return new String(hexChars);
     }
 
     public void  configUartMode() {
@@ -200,8 +226,7 @@ public class MainActivity extends AppCompatActivity {
             uartInit();
             setUartConfig(baurt, (byte) 8, (byte) 1, (byte) 0, (byte) 0);
             Log.d(TAG,"config UartMode is ok");
-        }
-        else {
+        } else {
             Log.e(TAG,"failed to config Uart mode");
         }
     }
@@ -424,8 +449,7 @@ public class MainActivity extends AppCompatActivity {
     private void setInterface(UsbDevice device) {
         if(device != null) {
             mUsbInterface = device.getInterface(0);
-        }
-        else {
+        } else {
             Log.e(TAG,"Can't get interface for device" + device.getDeviceName());
         }
     }
@@ -449,9 +473,6 @@ public class MainActivity extends AppCompatActivity {
             }
             mEndpointOut = epOut;
             mEndpointIn = epIn;
-
-            System.out.println(mEndpointIn.getType());
-            System.out.println(mEndpointOut.getType());
         }
     }
 
@@ -460,12 +481,10 @@ public class MainActivity extends AppCompatActivity {
             mDeviceConnection = mUsbManager.openDevice(mDevice);
             if(mDeviceConnection.claimInterface(mUsbInterface, true)) {
                 Log.d(TAG,"claim Interface succeeded");
-            }
-            else {
+            } else {
                 Log.e(TAG,"failed to claim interface");
             }
-        }
-        else {
+        } else {
             Log.e(TAG,"failed to open device.");
         }
     }
@@ -501,8 +520,7 @@ public class MainActivity extends AppCompatActivity {
                         setEndpoint();
                         setDeviceConnection();
                         configUartMode();
-                    }
-                    else {
+                    } else {
                         Log.d(TAG, "permission denied for device " + device);
                     }
                 }
